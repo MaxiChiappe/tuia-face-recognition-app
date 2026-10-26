@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import torch
 import onnxruntime
+from lib import face_pipeline
 from lib.schemas import EmbeddingRecord, FaceDetection, PredictResult, AlignedFace
 from lib.storage.base import EmbeddingStoreProtocol
 import os 
@@ -89,8 +90,13 @@ class FaceService:
         self.det_score_threshold and self.det_input_size.
         """
         if detector_path is None:
-            return None
-        return self._load_model(detector_path)
+            raise ValueError("DETECTOR_MODEL_NAME must be set (e.g. det_10g.onnx)")
+        if not Path(detector_path).exists():
+            raise ValueError(f"Detector path does not exist: {detector_path}")
+        # SCRFD wrapper from InsightFace: handles anchors, NMS and the 5 landmarks.
+        return face_pipeline.load_detector(
+            detector_path, self.det_score_threshold, self.det_input_size
+        )
 
     def _load_image(self, source_path: str) -> np.ndarray:
         image = cv2.imread(source_path)
@@ -113,24 +119,63 @@ class FaceService:
         Each box is (x1, y1, x2, y2) in pixels (InsightFace convention).
         Return a list of tuples with the coordinates of the faces detected in the image.
         """
-        raise NotImplementedError("Not implemented")
+        height, width = image.shape[:2]
+        bboxes, _ = face_pipeline.detect(self.detector, image, self.min_face_size)
+        return [
+            self._clip_xyxy(*(int(round(float(v))) for v in b[:4]), height=height, width=width)
+            for b in bboxes
+        ]
 
 
     def align_face(
         self, image: np.ndarray, box: tuple[int, int, int, int]
     ) -> AlignedFace:
         """
-        Crop using box (x1, y1, x2, y2) and run FaceAnalysis on the crop.
+        Crop using box (x1, y1, x2, y2) with a margin, re-detect on the crop to get
+        the 5 landmarks and align them to the ArcFace template.
         Return an AlignedFace object.
         """
-        raise NotImplementedError("Not implemented")
+        height, width = image.shape[:2]
+        x1, y1, x2, y2 = box
+        mx = int((x2 - x1) * self.align_margin)
+        my = int((y2 - y1) * self.align_margin)
+        cx1, cy1, cx2, cy2 = self._clip_xyxy(x1 - mx, y1 - my, x2 + mx, y2 + my, height, width)
+        crop = image[cy1:cy2, cx1:cx2]
+
+        bboxes, kpss = face_pipeline.detect(self.detector, crop)
+        kps = None
+        if len(bboxes):
+            # Several faces may fall inside the margin: keep the one matching the box.
+            target = np.array([x1 - cx1, y1 - cy1, x2 - cx1, y2 - cy1], np.float32)
+            best = int(np.argmax([self._iou(b[:4], target) for b in bboxes]))
+            kps = kpss[best] + np.array([cx1, cy1], np.float32)
+
+        if kps is not None:
+            aligned = face_pipeline.align(image, kps, self.face_size)
+            keypoints = kps - np.array([x1, y1], np.float32)
+        else:
+            logger.warning(f"No landmarks found for box {box}; using unaligned crop")
+            aligned = cv2.resize(image[y1:y2, x1:x2], (self.face_size, self.face_size))
+            keypoints = None
+
+        return AlignedFace(bbox=box, keypoints=keypoints, image=aligned)
 
     def extract_embedding_from_face(self, face: AlignedFace) -> list[float]:
         """
         Extract embedding from face.
         Return a list of floats representing the embedding of the face.
         """
-        raise NotImplementedError("Not implemented")
+        if face.embedding is not None:
+            return face.embedding
+        blob = face_pipeline.preprocess(face.image)
+        if isinstance(self.model, onnxruntime.InferenceSession):
+            input_name = self.model.get_inputs()[0].name
+            emb = self.model.run(None, {input_name: blob})[0]
+        else:
+            self.model.eval()
+            with torch.no_grad():
+                emb = self.model(torch.from_numpy(blob)).cpu().numpy()
+        return face_pipeline.l2_normalize(emb).astype(float).tolist()
         
     def _cosine(self, a: np.ndarray, b: np.ndarray) -> float:
         denom = np.linalg.norm(a) * np.linalg.norm(b)
