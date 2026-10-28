@@ -51,6 +51,25 @@ def detect(
     return bboxes[order], kpss[order]
 
 
+def detect_with_border(
+    detector: SCRFD, image: np.ndarray, min_face_size: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Same as detect(), but if no face is found, retry with a black border around the
+    image. SCRFD misses faces that fill the whole image (tight crops, like the Pins
+    dataset); the border gives it context. Coordinates refer to the original image.
+    """
+    bboxes, kpss = detect(detector, image, min_face_size)
+    if len(bboxes):
+        return bboxes, kpss
+    border = image.shape[0] // 2
+    padded = cv2.copyMakeBorder(image, border, border, border, border, cv2.BORDER_CONSTANT)
+    bboxes, kpss = detect(detector, padded, min_face_size)
+    bboxes[:, :4] -= border
+    kpss -= border
+    return bboxes, kpss
+
+
 def align(image: np.ndarray, kps: np.ndarray, face_size: int = 112) -> np.ndarray:
     """Similarity transform of the 5 landmarks to the ArcFace template (BGR in, BGR out)."""
     return face_align.norm_crop(image, landmark=np.asarray(kps, np.float32), image_size=face_size)

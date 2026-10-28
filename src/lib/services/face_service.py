@@ -120,7 +120,7 @@ class FaceService:
         Return a list of tuples with the coordinates of the faces detected in the image.
         """
         height, width = image.shape[:2]
-        bboxes, _ = face_pipeline.detect(self.detector, image, self.min_face_size)
+        bboxes, _ = face_pipeline.detect_with_border(self.detector, image, self.min_face_size)
         return [
             self._clip_xyxy(*(int(round(float(v))) for v in b[:4]), height=height, width=width)
             for b in bboxes
@@ -142,7 +142,7 @@ class FaceService:
         cx1, cy1, cx2, cy2 = self._clip_xyxy(x1 - mx, y1 - my, x2 + mx, y2 + my, height, width)
         crop = image[cy1:cy2, cx1:cx2]
 
-        bboxes, kpss = face_pipeline.detect(self.detector, crop)
+        bboxes, kpss = face_pipeline.detect_with_border(self.detector, crop)
         kps = None
         if len(bboxes):
             # Several faces may fall inside the margin: keep the one matching the box.
