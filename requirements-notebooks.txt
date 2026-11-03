@@ -1,0 +1,27 @@
+# Entorno con el que se ejecutaron 1-pre-processing.ipynb y 2-train.ipynb
+# Python 3.13.12 en Windows, GPU NVIDIA GTX 1050 (CUDA 12.6)
+#
+# torch y torchvision se instalan desde el índice de PyTorch para usar la GPU:
+#   pip install -r requirements-notebooks.txt --extra-index-url https://download.pytorch.org/whl/cu126
+#
+# La app (Docker) usa requirements.txt.
+
+albumentations==2.0.8
+albucore==0.0.24
+certifi==2026.10.23
+insightface==2.1
+ipykernel==7.4.0
+kagglehub==1.0.3
+kagglesdk==0.1.38
+matplotlib==3.11.2
+numpy==2.5.4
+onnx==1.23.2
+onnxruntime==1.31.0
+opencv-python==5.0.0.93
+pillow==12.3.0
+scikit-image==0.26.0
+scikit-learn==1.9.1
+scipy==1.18.1
+torch==2.14.1+cu126
+torchvision==0.29.1+cu126
+tqdm==4.70.1
